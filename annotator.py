@@ -7,17 +7,23 @@ from pathlib import Path
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from core import init_model,predict
+import os, glob
 
 #Forbidden  Key: QSFKL
 class Annotator(object):
-    def __init__(self ,img_path, model,if_sis=False,if_cuda=True,save_path=None):
+    def __init__(self ,input_dir, model,if_sis=False,if_cuda=True,output_dir=None):
 
-        self.model,self.if_sis,self.if_cuda,self.save_path=model,if_sis,if_cuda,save_path
-        self.file = Path(img_path).name
-        self.img = np.array(Image.open(img_path))
+        self.model,self.if_sis,self.if_cuda,self.output_dir=model,if_sis,if_cuda,output_dir
+        self.imgs_path = sorted(glob.glob(os.path.join(input_dir, "*.jpg")))
+        self.imgs_path += sorted(glob.glob(os.path.join(input_dir, "*.png")))
+        self.file = Path(input_dir).name
+        self.imgs = ([np.array(Image.open(img_path)), img_path] for img_path in self.imgs_path)  # generator
+        self.img, self.img_path = next(self.imgs)
         self.clicks = np.empty([0,3],dtype=np.int64)
         self.pred = np.zeros(self.img.shape[:2],dtype=np.uint8)
         self.merge =  self.__gene_merge(self.pred, self.img, self.clicks)
+
+        os.makedirs(self.output_dir, exist_ok=True)  # creat directory if not exist
 
     def __gene_merge(self,pred,img,clicks,r=9,cb=2,b=2,if_first=True):
         pred_mask=cv2.merge([pred*255,pred*255,np.zeros_like(pred)])
@@ -59,10 +65,15 @@ class Annotator(object):
         elif event.key=='escape':
             plt.close()
         elif event.key=='enter':
-            if self.save_path is not None:
-                Image.fromarray(self.pred*255).save(self.save_path)
-                print('save mask in [{}]!'.format(self.save_path))
-            plt.close()
+            if self.output_dir is not None:
+                save_path = os.path.join(self.output_dir, os.path.basename(self.img_path))
+                Image.fromarray(self.pred*255).save(save_path)
+                print('save mask in [{}]!'.format(save_path))
+            try:
+                self.img, self.img_path = next(self.imgs)
+                self.__reset()
+            except:
+                plt.close()
 
     def __on_button_press(self,event):
         if (event.xdata is None) or (event.ydata is None):return
@@ -85,13 +96,13 @@ class Annotator(object):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Annotator for FCANet")
-    parser.add_argument('--input', type=str, default='test.jpg', help='input image')
-    parser.add_argument('--output', type=str, default='test_mask.png', help='output mask')
+    parser.add_argument('--input_dir', type=str, default='test.jpg', help='input image directory')
+    parser.add_argument('--output_dir', type=str, default='test_mask.png', help='output mask directory')
     parser.add_argument('--backbone', type=str, default='resnet', choices=['resnet', 'res2net'], help='backbone name (default: resnet)')
     parser.add_argument('--sis', action='store_true', default=False, help='use sis')
     parser.add_argument('--cpu', action='store_true', default=False, help='use cpu (not recommended)')
     args = parser.parse_args()
 
     model = init_model('fcanet',args.backbone,'./pretrained_model/fcanet-{}.pth'.format(args.backbone),if_cuda=not args.cpu)
-    anno=Annotator(img_path=args.input ,model=model, if_sis=args.sis, if_cuda=not args.cpu,save_path=args.output)
+    anno=Annotator(input_dir=args.input_dir ,model=model, if_sis=args.sis, if_cuda=not args.cpu,output_dir=args.output_dir)
     anno.main()
